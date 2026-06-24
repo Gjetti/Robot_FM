@@ -1,0 +1,42 @@
+# configs/train.yaml
+
+model:
+  name: Qwen/Qwen2.5-1.5B-Instruct
+
+output:
+  checkpoint_root: ./checkpoints
+
+dataset:
+  format: alpaca
+
+datasets:
+  - path: /home/georges/Go2SDK-main/example/go2/low_level/planning_alpaca_withoutC_feb18_qwen_eos.jsonl
+    type: alpaca
+
+use_lora: true
+
+lora:
+  r: 24
+  alpha: 48
+  dropout: 0.05
+
+
+optimizer:
+  name: adamw_bnb_8bit
+
+scheduler:
+  name: cosine
+  warmup_ratio: 0.02
+
+
+training:
+  batch_size: 2
+  grad_accum: 4
+  lr: 2.0e-5
+  epochs: 4
+  max_length: 512
+  bf16: true
+  logging_steps: 10
+  eval_ratio: 0.05
+
+seed: 42

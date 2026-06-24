@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+.env/
+.conda/
+
+# Models and checkpoints
+checkpoints/
+
+# Test outputs
+test_results/
+
+# Tensorboard
+runs/
+events.out.tfevents.*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Large files
+*.safetensors
+*.pt
+*.pth
+*.bin
