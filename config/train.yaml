@@ -7,17 +7,17 @@ output:
   checkpoint_root: ./checkpoints
 
 dataset:
-  format: alpaca
+  format: chatml
 
 datasets:
-  - path: /home/georges/Go2SDK-main/example/go2/low_level/planning_alpaca_withoutC_feb18_qwen_eos.jsonl
-    type: alpaca
+  - path: /home/quads/data llms/new training data clean/gold_standard_rollouts_july13_chatml_downsampled_2hz.jsonl
+    type: chatml
 
 use_lora: true
 
 lora:
-  r: 24
-  alpha: 48
+  r: 512
+  alpha: 1024
   dropout: 0.05
 
 

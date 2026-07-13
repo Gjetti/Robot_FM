@@ -6,7 +6,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 
-RUN_NAME = "Qwen2.5-1.5B-Instruct_lr2e-05_r24_20260623_191554"
+RUN_NAME = "Qwen2.5-1.5B-Instruct_lr2e-05_r512_20260710_092126"
 # training run to merge
 LORA_PATH = f"checkpoints/{RUN_NAME}/best_adapter"
 

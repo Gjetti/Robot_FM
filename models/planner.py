@@ -18,7 +18,7 @@ class PlannerModel(nn.Module):
         self.llm = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=torch.bfloat16,
-            device_map="cuda",
+            #device_map="cuda", NOTE REMOVED FOR DOUBLE GPU USE
             trust_remote_code=True,
         )
 

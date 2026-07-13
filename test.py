@@ -14,6 +14,8 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
+
+
 # ==========================================================
 # CONFIG
 # ==========================================================
@@ -23,10 +25,10 @@ BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 #change name if needed
 MODEL_PATH = (
     "checkpoints/merged/"
-    "Qwen2.5-1.5B-Instruct_lr2e-05_r24_20260623_191554"
+    "Qwen2.5-1.5B-Instruct_lr2e-05_r512_20260710_092126"
 )
 
-INPUT_CSV = "/home/georges/Go2SDK-main/example/go2/low_level/collected_demos_for_physics_rollouts_filtered.csv"
+INPUT_CSV = "/home/quads/data llms/collected_demos_for_physics_rollouts_filtered.csv"
 
 MAX_NEW_TOKENS = 150
 #NOTE that it is best to have do_sample=False to check the models plans deterministically. however it is also beneficial to check the stochastic planning of the model!
@@ -40,6 +42,143 @@ BUCKET_SIZE = 1000
 MAX_TRAJ_ID = 8000
 
 SEED = 1
+
+REFERENCE_FRAME = "world"   # "world" or "robot" in the dataset
+# ==========================================================
+# Geometry helpers for the transformation
+# ==========================================================
+
+import math
+import re
+
+ROBOT_POSE_RE = re.compile(
+    r"\(x=([-0-9.]+),y=([-0-9.]+),yaw=([-0-9.]+)\)"
+)
+
+OBJECT_POSE_RE = re.compile(
+    r"\(x=([-0-9.]+),y=([-0-9.]+),yaw=([-0-9.]+)\)"
+)
+
+
+def wrap_angle(angle_deg):
+    while angle_deg > 180:
+        angle_deg -= 360
+    while angle_deg <= -180:
+        angle_deg += 360
+    return angle_deg
+
+
+def world_to_robot(
+    x_world,
+    y_world,
+    yaw_world,
+    robot_x,
+    robot_y,
+    robot_yaw,
+):
+    dx = x_world - robot_x
+    dy = y_world - robot_y
+
+    theta = math.radians(robot_yaw)
+
+    x_robot = (
+        math.cos(theta) * dx
+        + math.sin(theta) * dy
+    )
+
+    y_robot = (
+        math.sin(theta) * dx
+        - math.cos(theta) * dy
+    )
+
+    yaw_robot = wrap_angle(
+        yaw_world - robot_yaw
+    )
+
+    return (
+        round(x_robot, 3),
+        round(y_robot, 3),
+        round(yaw_robot, 1),
+    )
+
+def parse_robot_pose(robot_string):
+
+    m = ROBOT_POSE_RE.search(robot_string)
+
+    if m is None:
+        raise RuntimeError(
+            f"Could not parse robot pose:\n{robot_string}"
+        )
+
+    return (
+        float(m.group(1)),
+        float(m.group(2)),
+        float(m.group(3)),
+    )
+
+def robot_to_world(
+    x_robot,
+    y_robot,
+    yaw_robot,
+    robot_x,
+    robot_y,
+    robot_yaw,
+):
+    theta = math.radians(robot_yaw)
+
+    dx = (
+        math.cos(theta) * x_robot
+        + math.sin(theta) * y_robot
+    )
+
+    dy = (
+        math.sin(theta) * x_robot
+        - math.cos(theta) * y_robot
+    )
+
+    x_world = robot_x + dx
+    y_world = robot_y + dy
+
+    yaw_world = wrap_angle(
+        yaw_robot + robot_yaw
+    )
+
+    return (
+        round(x_world, 3),
+        round(y_world, 3),
+        round(yaw_world, 1),
+    )
+
+POSE_RE = re.compile(
+    r"\(x=([-0-9.]+),y=([-0-9.]+),yaw=([-0-9.]+)\)"
+)
+
+def robot_plan_to_world(
+    plan,
+    robot_x,
+    robot_y,
+    robot_yaw,
+):
+    def repl(match):
+
+        x = float(match.group(1))
+        y = float(match.group(2))
+        yaw = float(match.group(3))
+
+        xw, yw, yaww = robot_to_world(
+            x,
+            y,
+            yaw,
+            robot_x,
+            robot_y,
+            robot_yaw,
+        )
+
+        return (
+            f"(x={xw},y={yw},yaw={yaww})"
+        )
+
+    return POSE_RE.sub(repl, plan)
 
 
 # ==========================================================
@@ -163,20 +302,47 @@ def build_instruction(row):
 
     task = str(row["task"]).strip()
 
-    if task == "" or task.lower() == "nan":
-        task = "navigate to (x=0.0,y=0.0,yaw=0.0)"
+    if (
+        task == ""
+        or task.lower() == "nan"
+    ):
+        task = (
+            "navigate to "
+            "(x=0.0,y=0.0,yaw=0.0)"
+        )
 
-    extra = (
-        " without colliding with any object. "
-        "You must reason if a collision-free path exists. "
-        "You may manipulate (PLANAR PUSHING) movable objects if necessary, "
-        "but you must approach objects before manipulating them if they are far."
+    if REFERENCE_FRAME == "world":
+        return task
+
+    robot_x, robot_y, robot_yaw = (
+        parse_robot_pose(row["robot"])
     )
 
-    return task #+ extra
+    m = ROBOT_POSE_RE.search(task)
+
+    if m is None:
+        return task
+
+    gx = float(m.group(1))
+    gy = float(m.group(2))
+    gyaw = float(m.group(3))
+
+    gx_r, gy_r, gyaw_r = world_to_robot(
+        gx,
+        gy,
+        gyaw,
+        robot_x,
+        robot_y,
+        robot_yaw,
+    )
+
+    return (
+        f"navigate to "
+        f"(x={gx_r},y={gy_r},yaw={gyaw_r})"
+    )
 
 
-def build_input_text(row):
+"""def build_input_text(row):
 
     text = f"Robot state: {row['robot']}\n"
     text += "Objects:\n"
@@ -191,8 +357,97 @@ def build_input_text(row):
     text += "Previous skill: NA\n"
     text += "Done: False\n"
 
-    return text
+    return text"""
 
+def transform_object_string(
+    object_string,
+    robot_x,
+    robot_y,
+    robot_yaw,
+):
+
+    parts = object_string.rsplit(",", 3)
+
+    if len(parts) != 4:
+        return object_string
+
+    pose = (
+        parts[-3]
+        + ","
+        + parts[-2]
+        + ","
+        + parts[-1]
+    )
+
+    m = ROBOT_POSE_RE.search(pose)
+
+    if m is None:
+        return object_string
+
+    ox = float(m.group(1))
+    oy = float(m.group(2))
+    oyaw = float(m.group(3))
+
+    ox_r, oy_r, oyaw_r = world_to_robot(
+        ox,
+        oy,
+        oyaw,
+        robot_x,
+        robot_y,
+        robot_yaw,
+    )
+
+    prefix = object_string[
+        : m.start()
+    ]
+
+    return (
+        prefix
+        + f"(x={ox_r},y={oy_r},yaw={oyaw_r})"
+    )
+
+def build_input_text(row):
+
+    text = ""
+
+    if REFERENCE_FRAME == "world":
+        text += f"Robot state: {row['robot']}\n"
+
+    text += "Objects:\n"
+
+    if REFERENCE_FRAME == "robot":
+
+        robot_x, robot_y, robot_yaw = (
+            parse_robot_pose(row["robot"])
+        )
+
+    for i in range(1, 21):
+
+        col = f"object_{i}"
+
+        if col not in row:
+            continue
+
+        if pd.isna(row[col]):
+            continue
+
+        obj = str(row[col])
+
+        if REFERENCE_FRAME == "robot":
+
+            obj = transform_object_string(
+                obj,
+                robot_x,
+                robot_y,
+                robot_yaw,
+            )
+
+        text += f"{col}: {obj}\n"
+
+    text += "Previous skill: NA\n"
+    text += "Done: False\n"
+
+    return text
 
 def build_prompt(
     instruction,
@@ -252,6 +507,7 @@ for idx, row in sampled.iterrows():
         tokenizer=tokenizer,
         format_type="chatml",
     )
+    #print(prompt)
 
     inputs = tokenizer(
         prompt,
@@ -268,7 +524,6 @@ for idx, row in sampled.iterrows():
     torch.cuda.synchronize()
 
     start = time.time()
-
     with torch.no_grad():
 
         outputs = model.generate(
@@ -307,7 +562,7 @@ for idx, row in sampled.iterrows():
         generated_tokens,
         skip_special_tokens=False,
     ).strip()
-
+    #print(response)
     EOS_MARKERS = [
         "<|end_of_text|>",
         "<|im_end|>",
@@ -351,7 +606,7 @@ print(
 
 
 # ==========================================================
-# CREATE ROLLOUT DATASET
+# CREATE ROLLOUT DATASET(S)
 # ==========================================================
 
 rollout_df = sampled.copy()
@@ -382,15 +637,74 @@ columns.append("actions")
 
 rollout_df = rollout_df[columns]
 
-rollout_df.to_csv(
-    rollout_csv,
-    index=False,
-)
 
-print(
-    f"Saved rollout dataset to:\n{rollout_csv}"
-)
+# ----------------------------------------------------------
+# WORLD FRAME DATASET (default behavior)
+# ----------------------------------------------------------
 
+if REFERENCE_FRAME == "world":
+
+    rollout_df.to_csv(
+        rollout_csv,
+        index=False,
+    )
+
+    print(
+        f"Saved rollout dataset to:\n{rollout_csv}"
+    )
+
+# ----------------------------------------------------------
+# ROBOT FRAME DATASET + WORLD FRAME DATASET
+# ----------------------------------------------------------
+
+else:
+
+    # save raw robot-frame outputs
+    rollout_csv_robot = (
+        output_dir / "rollout_dataset_robot.csv"
+    )
+
+    rollout_df.to_csv(
+        rollout_csv_robot,
+        index=False,
+    )
+
+    print(
+        f"Saved robot-frame rollout dataset to:\n"
+        f"{rollout_csv_robot}"
+    )
+
+    # create world-frame copy for visualization
+    rollout_df_world = rollout_df.copy()
+
+    world_actions = []
+
+    for _, row in rollout_df_world.iterrows():
+
+        robot_x, robot_y, robot_yaw = (
+            parse_robot_pose(row["robot"])
+        )
+
+        world_actions.append(
+            robot_plan_to_world(
+                row["actions"],
+                robot_x,
+                robot_y,
+                robot_yaw,
+            )
+        )
+
+    rollout_df_world["actions"] = world_actions
+
+    rollout_df_world.to_csv(
+        rollout_csv,
+        index=False,
+    )
+
+    print(
+        f"Saved world-frame rollout dataset to:\n"
+        f"{rollout_csv}"
+    )
 
 # ==========================================================
 # LATENCY STATS

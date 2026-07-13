@@ -11,6 +11,12 @@ from robot_fm_data.format import AlpacaFormatter, ChatMLFormatter
 from robot_fm_data.loader import load_dataset, create_train_eval_split
 from transformers import set_seed
 from pathlib import Path
+import torch
+
+import os
+
+LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
+
 # --------------------------------------------------
 # Load config
 # --------------------------------------------------
@@ -69,15 +75,16 @@ dataset_type = dataset_cfg["type"]
 
 data = load_dataset(dataset_cfg)
 
-print(f"Loaded {len(data)} samples")
+if LOCAL_RANK == 0:
+    print(f"Loaded {len(data)} samples")
 
-print("Example:")
-print(data[0])
+    print("Example:")
+    print(data[0])
 
-print("Formatted example:")
-prompt, response = formatter.format(data[0])
-print(prompt)
-print(response)
+    print("Formatted example:")
+    prompt, response = formatter.format(data[0])
+    print(prompt)
+    print(response)
 
 train_data, eval_data = create_train_eval_split(
     data,
@@ -85,8 +92,9 @@ train_data, eval_data = create_train_eval_split(
     seed=cfg["seed"],
 )
 
-print(f"Length of train data: {len(train_data)}")
-print(f"Length of eval data: {len(eval_data)}")
+if LOCAL_RANK == 0:
+    print(f"Length of train data: {len(train_data)}")
+    print(f"Length of eval data: {len(eval_data)}")
 
 train_dataset = PlannerDataset(
     data=train_data,
@@ -129,14 +137,19 @@ best_adapter_dir = (
     f"{checkpoint_dir}/best_adapter"
 )
 
+world_size = int(os.environ.get("WORLD_SIZE", 1))
+
+if LOCAL_RANK == 0:
+    print("WORLD_SIZE =", world_size)
+
 steps_per_epoch = (
     len(train_dataset)
     // (
         cfg["training"]["batch_size"]
         * cfg["training"]["grad_accum"]
+        * world_size
     )
 )
-
 eval_steps = max(1, steps_per_epoch // 4)
 training_args = TrainingArguments(
 
@@ -180,6 +193,7 @@ training_args = TrainingArguments(
 
     greater_is_better=False,
 
+    ddp_find_unused_parameters=False, #in one of the runs it was given as a warning, so we set it to false.
 )
 
 # --------------------------------------------------
@@ -195,12 +209,13 @@ trainable_params = sum(
     if p.requires_grad
 )
 
-print(f"Trainable Parameters: {trainable_params:,}")
-print(f"Total Parameters: {total_params:,}")
-print(
-    f"Trainable %: "
-    f"{100 * trainable_params / total_params:.4f}%"
-)
+if LOCAL_RANK == 0:
+    print(f"Trainable Parameters: {trainable_params:,}")
+    print(f"Total Parameters: {total_params:,}")
+    print(
+        f"Trainable %: "
+        f"{100 * trainable_params / total_params:.4f}%"
+    )
 
 #create directories for loggign checkpoints
 import os
@@ -208,6 +223,9 @@ import os
 os.makedirs(checkpoint_dir, exist_ok=True)
 os.makedirs(best_adapter_dir, exist_ok=True)
 
+model.llm.config.use_cache = False
+#model.llm.gradient_checkpointing_enable()
+model.llm.enable_input_require_grads()
 # --------------------------------------------------
 # Trainer
 # --------------------------------------------------
@@ -229,6 +247,7 @@ trainer.train()
 # Save model
 # --------------------------------------------------
 
-trainer.save_model(best_adapter_dir)
+if trainer.is_world_process_zero(): #only 1 gpu should save
+    trainer.save_model(best_adapter_dir)
 
-tokenizer.save_pretrained(best_adapter_dir)
+    tokenizer.save_pretrained(best_adapter_dir)
