@@ -1,0 +1,54 @@
+# configs/train_RA-BC.yaml
+
+model:
+  name: Qwen/Qwen2.5-1.5B-Instruct
+
+output:
+  checkpoint_root: ./checkpoints
+
+dataset:
+  format: chatml
+
+datasets:
+  - path: /home/georges/BoxPushingProject/source/georges_ext/georges_ext/tasks/locomotion/georges_v0/all_successful_rollouts_50hz_july24_downsampled_2hz_july24_with_returns-to-go_chatml.jsonl
+    type: chatml
+
+use_lora: true
+
+lora:
+  r: 512
+  alpha: 1024
+  dropout: 0.05
+
+
+optimizer:
+  name: adamw_bnb_8bit
+
+scheduler:
+  name: cosine
+  warmup_ratio: 0.02
+
+
+training:
+  batch_size: 2
+  grad_accum: 4
+  lr: 2.0e-5
+  epochs: 4
+  max_length: 512
+  bf16: true
+  logging_steps: 10
+  eval_ratio: 0.05
+
+seed: 42
+
+reward_alignment:
+  # Exact field already attached to every trajectory row.
+  return_column: segment_return_to_go
+
+  # Bounded linear return-to-weight mapping.
+  min_weight: 0.25
+  max_weight: 1.0
+
+  # Initially use the complete training range.
+  lower_percentile: 0.0
+  upper_percentile: 100.0 

@@ -10,7 +10,7 @@ dataset:
   format: chatml
 
 datasets:
-  - path: /home/quads/data llms/new training data clean/gold_standard_rollouts_july13_chatml_downsampled_2hz.jsonl
+  - path: /home/georges/BoxPushingProject/source/georges_ext/georges_ext/tasks/locomotion/georges_v0/all_successful_rollouts_50hz_july24_downsampled_2hz_july24_chatml.jsonl
     type: chatml
 
 use_lora: true
